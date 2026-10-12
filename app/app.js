@@ -27,7 +27,7 @@ const SIGNALS = P.checks.filter(c => c.ch.indexOf('30-day') > -1);
 /* ---------- state ---------- */
 function blank() {
   return { v: 1, email: DEFAULT_EMAIL, start: today(), xp: 0, updated: 0, days: {}, read: {}, pos: {}, checks: {}, cards: {},
-    scen: {}, gen: [], drills: {}, work: [], log: [], theme: 'auto' };
+    scen: {}, gen: [], drills: {}, work: [], log: [], ojt: {}, theme: 'auto' };
 }
 let S;
 try { S = Object.assign(blank(), JSON.parse(localStorage.getItem(KEY) || 'null') || {}); } catch (e) { S = blank(); }
@@ -183,13 +183,14 @@ const IC = {
   drills: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/>',
   progress: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
   coach: '<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/>',
-  palace: '<path d="M3 21h18M5 21V10l7-6 7 6v11M9 21v-6h6v6"/>'
+  palace: '<path d="M3 21h18M5 21V10l7-6 7 6v11M9 21v-6h6v6"/>',
+  ojt: '<circle cx="8" cy="7" r="3"/><circle cx="17" cy="9" r="2.4"/><path d="M2.5 20c.5-4 2.8-6 5.5-6s5 2 5.5 6M13.5 16c.8-1.6 2-2.4 3.5-2.4 2.3 0 4 1.8 4.5 5"/>'
 };
 const icon = n => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${IC[n]}</svg>`;
 
 /* ---------- shell ---------- */
 const NAV = [
-  ['today', 'Today'], ['learn', 'Library'], ['flash', 'Flash'], ['lab', 'Simulator'], ['build', 'Workflows'], ['drills', 'Drills'], ['palace', 'Memory palace'], ['progress', 'Progress']
+  ['today', 'Today'], ['learn', 'Library'], ['ojt', 'Shadow a PM'], ['lab', 'Simulator'], ['flash', 'Flash'], ['build', 'Workflows'], ['drills', 'Drills'], ['palace', 'Memory palace'], ['progress', 'Progress']
 ];
 function shell() {
   let root = document.getElementById('pmu');
@@ -211,7 +212,7 @@ function shell() {
     <button class="icon-btn" data-coach aria-label="Ask the coach">${icon('coach')}</button>
   </header>
   <main id="main" tabindex="-1"></main>
-  <nav class="tabs">${NAV.slice(0, 5).map(([k, l]) => `<a href="#/${k}" data-nav="${k}">${icon(k)}<span>${l}</span></a>`).join('')}</nav>
+  <nav class="tabs">${NAV.slice(0, 5).map(([k, l]) => `<a href="#/${k}" data-nav="${k}">${icon(k)}<span>${k === 'ojt' ? 'Shadow' : l}</span></a>`).join('')}</nav>
   <aside id="coach" class="coach" aria-label="AI coach">
     <div class="coach-head"><div><b>Coach</b><small>Gemini, inside PayMeGPT</small></div><button class="icon-btn" id="coachClose" aria-label="Close coach">✕</button></div>
     <div class="coach-cmds">${['Flash me Module D', 'Scenario drill', 'Grade my rationale', 'Mock interview', 'What am I weakest at?'].map(c => `<button class="chip" data-cmd="${c}">${c}</button>`).join('')}</div>
@@ -219,6 +220,7 @@ function shell() {
     <iframe id="coachFrame" title="PM University Coach"></iframe>
   </aside>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="termpop" class="termpop" hidden></div>
   <div id="sel" class="selpop" hidden><button>Ask coach about this</button></div>`;
   document.addEventListener('click', e => {
     const c = e.target.closest('[data-coach]'); if (c) { e.preventDefault(); coach(c.dataset.coach || ''); }
@@ -257,6 +259,8 @@ function route() {
 addEventListener('hashchange', route);
 
 /* ---------- TODAY ---------- */
+function ojtDoneCount() { return Object.values(S.ojt || {}).filter(x => x.done).length; }
+function ojtNextStage() { const O2 = window.OJT; if (!O2) return 1; for (const st of O2.stages) { if (!O2.eps.some(e => e.s === st.n && S.ojt && S.ojt[e.id] && S.ojt[e.id].done)) return st.n; } return 1; }
 function planDay() { return Math.min(30, Math.max(1, dayDiff(S.start, today()) + 1)); }
 function nextChapter() { return ORDER.find(id => !S.read[id]) || ORDER[0]; }
 function dueCards(deck) { const d = today(); return P.cards.filter(c => (!deck || c.deck === deck) && S.cards[c.id] && S.cards[c.id].due <= d); }
@@ -300,6 +304,7 @@ VIEWS.today = m => {
         <li><a href="#/flash"><b>Flashcards</b><span>${due ? due + ' due' : newCards().length + ' new waiting'}</span></a></li>
         <li><a href="#/drills"><b>5 rapid-fire drills</b><span>60 seconds each</span></a></li>
         <li><a href="#/lab"><b>1 scenario</b><span>${scDone}/${P.scenarios.length} attempted</span></a></li>
+        <li><a href="#/ojt/stage/${ojtNextStage()}"><b>Shadow a PM</b><span>${ojtDoneCount()}/${(window.OJT || { eps: [] }).eps.length} episodes</span></a></li>
         <li><a href="#/wf/eval-single"><b>1 timed evaluation</b><span>15-minute workflow</span></a></li>
       </ol>
     </div>
@@ -311,7 +316,7 @@ VIEWS.today = m => {
       <div><b>${sigDone}/5</b><span>ready-to-apply signals</span></div>
     </div>
   </section>
-  <nav class="more-links" aria-label="More">${[['drills', 'Drills'], ['palace', 'Memory palace'], ['progress', 'Progress']].map(([k, l]) => `<a href="#/${k}">${icon(k)}<span>${l}</span></a>`).join('')}<button data-coach>${icon('coach')}<span>Coach</span></button></nav>`;
+  <nav class="more-links" aria-label="More">${[['build', 'Workflows'], ['drills', 'Drills'], ['palace', 'Memory palace'], ['progress', 'Progress']].map(([k, l]) => `<a href="#/${k}">${icon(k)}<span>${l}</span></a>`).join('')}<button data-coach>${icon('coach')}<span>Coach</span></button></nav>`;
   const stage = $('#flashStage'), w = $('#flashWord');
   function flash() {
     if (reduced) return;
@@ -324,7 +329,8 @@ VIEWS.today = m => {
 
 /* ---------- LIBRARY ---------- */
 VIEWS.learn = m => {
-  m.innerHTML = `<header class="page-head"><h1>Library</h1><p>Read it as a course. Every checkbox, chapter and template saves as you go.</p></header>` +
+  m.innerHTML = `<header class="page-head"><h1>Library</h1><p>Read it as a course. Every checkbox, chapter and template saves as you go.</p></header>
+  <a class="panel gen-cta" href="#/ojt">${art('chairs', 'md')}<div><p class="kicker">Learn by watching real work</p><h2>Shadow a PM</h2><p>Each lesson as a real project: the meetings, the PM's thinking, rejected drafts, the finished documents and the questions you'll get. 3 products per lesson.</p><span class="btn primary">Open Shadow a PM</span></div></a>` +
     P.courses.map(c => {
       const done = c.chapters.filter(ch => S.read[ch.id]).length;
       return `<section class="course">
@@ -350,10 +356,12 @@ VIEWS.read = (m, [id]) => {
         <h1>${esc(ch.title)}</h1>
         <p class="muted">${Math.max(2, Math.round(ch.words / 200))} min read${S.read[id] ? ' · completed' : ''}</p></div>
       </header>
+      ${STAGE_OF_CH[id] ? `<a class="realwork" href="#/ojt/stage/${STAGE_OF_CH[id]}">${icon('ojt')}<span><b>See this lesson in real work</b><small>Shadow a PM or PO doing it on one of 3 products, with drafts, rejections and the finished documents.</small></span></a>` : ''}
       ${ch.idx === 0 && course.intro ? `<div class="intro">${course.intro}</div>` : ''}
       <div class="prose">${ch.html}</div>
       <footer class="chapter-foot">
         <button class="btn primary" id="done">${S.read[id] ? 'Completed — read again anytime' : 'Mark chapter complete'}</button>
+        ${STAGE_OF_CH[id] ? `<a class="btn" href="#/ojt/stage/${STAGE_OF_CH[id]}">See it in real work</a>` : ''}
         <button class="btn" data-coach="Flash me on this chapter of my course: &quot;${esc(ch.title)}&quot;. 2-minute summary, then 5 rapid-fire questions; grade each and correct my gaps.">Flash me on this chapter</button>
         <nav class="pn">${prev ? `<a href="#/read/${prev.id}">‹ ${esc(prev.title)}</a>` : '<span></span>'}${next ? `<a href="#/read/${next.id}">${esc(next.title)} ›</a>` : ''}</nav>
       </footer>
@@ -952,6 +960,256 @@ VIEWS.wf = (m, [id, docId]) => {
   draw();
 };
 
+/* ---------- SHADOW A PM (OJT) ---------- */
+const O = window.OJT || { stages: [], products: {}, terms: {}, eps: [] };
+const EP = {}; O.eps.forEach(e => EP[e.id] = e);
+const epFor = (s, p) => O.eps.find(e => e.s === s && e.p === p);
+const STAGE_OF_CH = {}; O.stages.forEach(st => st.chapters.forEach(c => { if (!STAGE_OF_CH[c]) STAGE_OF_CH[c] = st.n; }));
+function ojtState(id) { S.ojt = S.ojt || {}; return S.ojt[id] = S.ojt[id] || { calls: {}, task: '', qa: {}, done: 0 }; }
+
+function mdInline(s) {
+  return esc(s).replace(/\[\[([a-z0-9]+)\|([^\]]+)\]\]/g, (m, k, t) => O.terms[k] ? `<button class="term" data-t="${k}">${t}</button>` : t)
+    .replace(/\[\[([a-z0-9]+)\]\]/g, (m, k) => O.terms[k] ? `<button class="term" data-t="${k}">${esc(O.terms[k].name)}</button>` : k)
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+}
+function md(src) {
+  const lines = String(src).split('\n'); let out = '', list = null, table = null, para = [];
+  const flushP = () => { if (para.length) { out += `<p>${para.map(mdInline).join('<br>')}</p>`; para = []; } };
+  const flushL = () => { if (list) { out += `<${list.t}>${list.items.map(i => `<li>${mdInline(i)}</li>`).join('')}</${list.t}>`; list = null; } };
+  const flushT = () => { if (table) { out += '<div class="tbl"><table>' + table.map((r, i) => '<tr>' + r.map(c => i === 0 ? `<th>${mdInline(c)}</th>` : `<td>${mdInline(c)}</td>`).join('') + '</tr>').join('') + '</table></div>'; table = null; } };
+  const flush = () => { flushP(); flushL(); flushT(); };
+  for (const raw of lines) {
+    const l = raw.trimEnd();
+    if (!l.trim()) { flush(); continue; }
+    let m;
+    if ((m = l.match(/^(#{1,2})\s+(.*)/))) { flush(); out += m[1].length === 1 ? `<h3>${mdInline(m[2])}</h3>` : `<h4>${mdInline(m[2])}</h4>`; continue; }
+    if (l.startsWith('|')) { flushP(); flushL(); (table = table || []).push(l.replace(/^\||\|$/g, '').split('|').map(x => x.trim())); continue; }
+    if ((m = l.match(/^\s*[-•]\s+(.*)/))) { flushP(); flushT(); if (!list || list.t !== 'ul') { flushL(); list = { t: 'ul', items: [] }; } list.items.push(m[1]); continue; }
+    if ((m = l.match(/^\s*\d+[.)]\s+(.*)/))) { flushP(); flushT(); if (!list || list.t !== 'ol') { flushL(); list = { t: 'ol', items: [] }; } list.items.push(m[1]); continue; }
+    if ((m = l.match(/^>\s?(.*)/))) { flush(); out += `<blockquote>${mdInline(m[1])}</blockquote>`; continue; }
+    flushL(); flushT(); para.push(l);
+  }
+  flush(); return out;
+}
+const plain = s => String(s).replace(/\[\[[a-z0-9]+\|([^\]]+)\]\]/g, '$1').replace(/\*\*/g, '');
+function wordDiff(a, b) {
+  const tok = t => plain(t).replace(/\n+/g, ' ¶ ').split(/\s+/).filter(Boolean); const A = tok(a), B = tok(b);
+  const n = A.length, mm = B.length; const L = Array.from({ length: n + 1 }, () => new Uint16Array(mm + 1));
+  for (let i = n - 1; i >= 0; i--) for (let j = mm - 1; j >= 0; j--) L[i][j] = A[i] === B[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+  let i = 0, j = 0, out = [];
+  while (i < n && j < mm) { if (A[i] === B[j]) { out.push(esc(A[i])); i++; j++; } else if (L[i + 1][j] >= L[i][j + 1]) { out.push(`<del>${esc(A[i++])}</del>`); } else { out.push(`<ins>${esc(B[j++])}</ins>`); } }
+  while (i < n) out.push(`<del>${esc(A[i++])}</del>`); while (j < mm) out.push(`<ins>${esc(B[j++])}</ins>`);
+  return out.join(' ').replace(/<\/del> <del>/g, ' ').replace(/<\/ins> <ins>/g, ' ').replace(/<del>(\s*¶\s*)+<\/del>/g, '').replace(/\s*¶\s*/g, '<br>');
+}
+function markQuotes(root, comments) {
+  comments.forEach((c, n) => {
+    const q = c[1].toLowerCase(); const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT); let node;
+    while ((node = w.nextNode())) {
+      const i = node.data.toLowerCase().indexOf(q); if (i < 0) continue;
+      const r = document.createRange(); r.setStart(node, i); r.setEnd(node, i + q.length);
+      const mk = document.createElement('mark'); mk.className = 'cmt'; mk.dataset.n = n + 1; r.surroundContents(mk); break;
+    }
+  });
+}
+function who(cast, k) { const c = cast[k] || [k, '', 'user']; const ini = c[0].split(/\s+/).filter(Boolean).map(x => x[0]).slice(0, 2).join(''); return { name: c[0], role: c[1], team: c[2], ini }; }
+const avatar = (cast, k) => { const p = who(cast, k); return `<span class="av t-${p.team}" title="${esc(p.name)} — ${esc(p.role)}">${esc(p.ini)}</span>`; };
+
+// term popover
+document.addEventListener('click', e => {
+  const t = e.target.closest('.term'); const pop = $('#termpop');
+  if (!t) { if (pop && !e.target.closest('#termpop')) pop.hidden = true; return; }
+  const d = O.terms[t.dataset.t]; if (!d || !pop) return;
+  pop.innerHTML = `<b>${esc(d.name)}</b><p>${esc(d.def)}</p>${CH[d.ch] ? `<a href="#/read/${d.ch}">Lesson: ${esc(CH[d.ch].title)}</a>` : ''}`;
+  const r = t.getBoundingClientRect(); pop.hidden = false;
+  pop.style.top = (r.bottom + scrollY + 8) + 'px'; pop.style.left = Math.max(12, Math.min(innerWidth - 332, r.left)) + 'px';
+});
+
+VIEWS.ojt = (m, [a, b]) => {
+  if (a === 'stage') return ojtPicker(m, +b);
+  if (a && EP[a]) return ojtPlayer(m, EP[a], b === 'sim' ? 'sim' : 'watch');
+  const doneN = O.eps.filter(e => S.ojt && S.ojt[e.id] && S.ojt[e.id].done).length;
+  m.innerHTML = `<header class="page-head"><h1>Shadow a PM</h1><p>Sit beside a senior PM or PO while they do the real work: the messy meetings and messages first, then their thinking, the decisions, every draft that got rejected and why, the finished documents, and the questions each team will throw at you. Pick a lesson, pick a product, then watch it done or simulate it yourself.</p><p class="small muted">${doneN} of ${O.eps.length} episodes complete · all companies and people are fictional</p></header>
+  <div class="prod-row">${Object.entries(O.products).map(([k, p]) => `<div class="panel prod" style="--pc:${p.color}"><span class="tag">${esc(p.type)}</span><h3>${esc(p.name)}</h3><p class="small">${esc(p.what)}</p><p class="small muted">Feature: <b>${esc(p.feature)}</b><br>Mentor: ${esc(p.mentor)}, ${esc(p.mentorRole)}</p></div>`).join('')}</div>
+  <ol class="stages">${O.stages.map(st => `<li class="panel stage">
+    <div class="stage-head">${art(st.art, 'sm')}<div><p class="kicker">Stage ${st.n} · ${esc(st.lesson)}</p><h2>${esc(st.title)}</h2><p class="small muted">${esc(st.teaches)}</p></div></div>
+    <div class="stage-picks">${Object.keys(O.products).map(pk => { const e = epFor(st.n, pk); if (!e) return ''; const ds = S.ojt && S.ojt[e.id]; return `<a class="pick ${ds && ds.done ? 'done' : ''}" style="--pc:${O.products[pk].color}" href="#/ojt/${e.id}"><b>${esc(O.products[pk].name)}</b><span>${esc(e.title)}</span><small>${ds && ds.done ? 'Done' : 'Start'}</small></a>`; }).join('')}</div>
+  </li>`).join('')}</ol>`;
+};
+
+function ojtPicker(m, n) {
+  const st = O.stages.find(x => x.n === n); if (!st) { location.hash = '#/ojt'; return; }
+  m.innerHTML = `<div class="session-top"><a href="#/ojt">‹ Shadow a PM</a><span>Stage ${n}</span></div>
+  <header class="page-head"><h1>${esc(st.title)}</h1><p>Lesson: ${st.chapters.map(c => CH[c] ? `<a href="#/read/${c}">${esc(CH[c].title)}</a>` : '').join(' · ')}</p><p>Which product do you want to work on?</p></header>
+  <div class="pick-big">${Object.entries(O.products).map(([pk, p]) => { const e = epFor(n, pk); return e ? `<div class="panel pickcard" style="--pc:${p.color}"><span class="tag">${esc(p.type)}</span><h2>${esc(p.name)}</h2><p class="small muted">${esc(p.what)}</p><h3>${esc(e.title)}</h3><p class="small">${esc(e.scene.slice(0, 180))}…</p><div class="row"><a class="btn primary" href="#/ojt/${e.id}">Watch the PM</a><a class="btn" href="#/ojt/${e.id}/sim">Simulate it myself</a></div></div>` : ''; }).join('')}</div>`;
+}
+
+function ojtPlayer(m, e, mode) {
+  const p = O.products[e.p]; const st = O.stages.find(x => x.n === e.s); const S0 = ojtState(e.id);
+  const calls = e.walk.map((w, i) => w.call ? i : -1).filter(i => i >= 0);
+  const others = Object.keys(O.products).map(pk => epFor(e.s, pk)).filter(x => x && x.id !== e.id);
+  m.innerHTML = `<div class="session-top"><a href="#/ojt">‹ Shadow a PM</a><span>Stage ${st.n} · ${esc(st.lesson)}</span><span class="modes"><a class="${mode === 'watch' ? 'on' : ''}" href="#/ojt/${e.id}">Watch</a><a class="${mode === 'sim' ? 'on' : ''}" href="#/ojt/${e.id}/sim">Simulate</a></span></div>
+  <header class="ep-head" style="--pc:${p.color}"><div><p class="kicker">${esc(p.name)} · ${esc(p.feature)}</p><h1>${esc(e.title)}</h1>
+    <p class="lessons">${st.chapters.map(c => CH[c] ? `<a class="chip" href="#/read/${c}">${esc(CH[c].title)}</a>` : '').join('')}</p></div>${art(st.art, 'md anim')}</header>
+  <div class="scene panel">${avatar(e.cast, Object.keys(e.cast)[0])}<p>${esc(e.scene)}</p></div>
+  ${mode === 'sim' ? `<p class="simnote">Simulate mode: read the inputs, make each decision, then write the work yourself. The PM's walkthrough, drafts and finished documents unlock after you submit.</p>` : ''}
+  <section class="ojt-sec"><h2><span class="n">1</span>The inputs</h2><p class="muted small">What the PM had in front of them. ${mode === 'watch' ? 'Press Play on meetings to watch them happen, with the PM\'s notes in the margin.' : 'Read everything before deciding anything.'}</p>
+    <div class="src-tabs" role="tablist">${e.sources.map((s, i) => `<button role="tab" data-i="${i}" class="${i === 0 ? 'on' : ''}"><i class="st-${s.type}"></i>${esc(s.title)}</button>`).join('')}</div>
+    <div id="srcBody"></div></section>
+  <section class="ojt-sec" id="secWalk"></section>
+  <section class="ojt-sec" id="secTask"></section>
+  <section class="ojt-sec" id="secDocs"></section>
+  <section class="ojt-sec" id="secQA"></section>
+  <footer class="ep-foot" id="epFoot"></footer>`;
+
+  // sources
+  const showSrc = i => {
+    $$('.src-tabs button', m).forEach(b => b.classList.toggle('on', +b.dataset.i === i));
+    const s = e.sources[i]; const box = $('#srcBody');
+    if (s.lines) {
+      box.innerHTML = `<div class="src-card"><div class="src-meta"><b>${esc(s.title)}</b><span>${esc(s.meta || '')}</span>${mode === 'watch' ? '<button class="btn sm" id="play">▶ Play</button>' : ''}</div>
+      <ol class="transcript ${s.type}">${s.lines.map((l, j) => { const pp = who(e.cast, l[0]); return `<li data-j="${j}">${avatar(e.cast, l[0])}<div class="bub"><b>${esc(pp.name)}</b> <small>${esc(pp.role)}</small><p>${esc(l[1])}</p></div>${l[2] && mode === 'watch' ? `<aside class="pmnote"><b>${esc(p.mentor.split(' ')[0])}'s note</b>${esc(l[2])}</aside>` : ''}</li>`; }).join('')}</ol></div>`;
+      const play = $('#play');
+      if (play) play.onclick = () => {
+        const items = $$('.transcript li', box); items.forEach(li => li.classList.add('hide')); play.disabled = true;
+        let j = 0; const step = () => { if (!document.body.contains(box)) return; if (j >= items.length) { play.disabled = false; play.textContent = '↻ Replay'; return; } items[j].classList.remove('hide'); items[j].classList.add('pop'); items[j].scrollIntoView({ block: 'nearest', behavior: reduced ? 'auto' : 'smooth' }); const len = (s.lines[j][1].length + (s.lines[j][2] || '').length); j++; setTimeout(step, reduced ? 0 : Math.min(4200, 900 + len * 28)); };
+        step();
+      };
+    } else {
+      box.innerHTML = `<div class="src-card ${s.type}"><div class="src-meta"><b>${esc(s.title)}</b><span>${esc(s.meta || '')}</span></div><div class="src-body prose-s">${md(s.body)}</div></div>`;
+    }
+  };
+  $$('.src-tabs button', m).forEach(b => b.onclick = () => showSrc(+b.dataset.i)); showSrc(0);
+
+  function callCard(w, i) {
+    const c = w.call; const chosen = S0.calls[i];
+    return `<div class="call ${chosen != null ? 'answered' : ''}" data-i="${i}"><p class="kicker">Your call</p><h3>${esc(c.q)}</h3>
+      <div class="opts">${c.opts.map((o, k) => `<button data-k="${k}" class="${chosen != null ? (k === c.a ? 'right' : k === chosen ? 'wrong' : '') : ''}" ${chosen != null ? 'disabled' : ''}>${esc(o)}</button>`).join('')}</div>
+      <div class="why" ${chosen != null ? '' : 'hidden'}><b>${chosen === c.a ? 'Same call as the PM.' : 'The PM chose differently.'}</b> ${esc(c.why)}</div></div>`;
+  }
+  function bindCalls(root) {
+    $$('.call', root).forEach(card => {
+      const i = +card.dataset.i; const c = e.walk[i].call;
+      $$('.opts button', card).forEach(b => b.onclick = () => {
+        if (S0.calls[i] != null) return; const k = +b.dataset.k; S0.calls[i] = k; persist();
+        $$('.opts button', card).forEach(x => { x.disabled = true; const kk = +x.dataset.k; if (kk === c.a) x.classList.add('right'); else if (kk === k) x.classList.add('wrong'); });
+        $('.why', card).hidden = false; $('.why b', card).textContent = k === c.a ? 'Same call as the PM.' : 'The PM chose differently.';
+        card.classList.add('answered'); if (k === c.a) toast('Same call as a senior PM');
+        if (mode === 'watch') nextStep();
+      });
+    });
+  }
+  // walkthrough
+  let shown = 0;
+  function walkHTML(upto) {
+    return e.walk.slice(0, upto).map((w, i) => w.call ? callCard(w, i) : `<div class="say">${avatar(e.cast, Object.keys(e.cast)[0])}<div><p>${esc(w.say)}</p>${(w.terms || []).length ? `<p class="terms">${w.terms.map(k => O.terms[k] ? `<button class="term" data-t="${k}">${esc(O.terms[k].name)}</button>` : '').join('')}</p>` : ''}${w.ref ? `<button class="linkish" data-ref="${w.ref}">See the source</button>` : ''}</div></div>`).join('');
+  }
+  function renderWalk() {
+    const sec = $('#secWalk');
+    sec.innerHTML = `<h2><span class="n">2</span>Over ${esc(p.mentor.split(' ')[0])}'s shoulder</h2><p class="muted small">${esc(p.mentor)}, ${esc(p.mentorRole)}, explains each move as it happens.</p><div class="walk">${walkHTML(shown)}</div>
+      ${shown < e.walk.length ? `<div class="row"><button class="btn primary" id="wNext">Continue</button><button class="btn" id="wAll">Show all</button></div>` : ''}`;
+    bindCalls(sec);
+    $$('[data-ref]', sec).forEach(b => b.onclick = () => { const i = e.sources.findIndex(s => s.id === b.dataset.ref); if (i >= 0) { showSrc(i); $('.src-tabs').scrollIntoView({ behavior: reduced ? 'auto' : 'smooth' }); } });
+    const nx = $('#wNext'); if (nx) nx.onclick = nextStep; const al = $('#wAll'); if (al) al.onclick = () => { shown = e.walk.length; renderWalk(); afterWalk(); };
+  }
+  function nextStep() {
+    // stop at an unanswered call
+    const pending = e.walk.slice(0, shown).findIndex((w, i) => w.call && S0.calls[i] == null);
+    if (pending >= 0) { toast('Make your call first'); return; }
+    shown = Math.min(e.walk.length, shown + 1); renderWalk();
+    const last = $$('#secWalk .walk > *').pop(); if (last) { last.classList.add('pop'); last.scrollIntoView({ block: 'nearest', behavior: reduced ? 'auto' : 'smooth' }); }
+    if (shown >= e.walk.length) afterWalk();
+  }
+  let revealed = false;
+  function afterWalk() { if (revealed) return; revealed = true; renderDocs(); renderQA(); renderTask(); renderFoot(); }
+
+  // documents with version history
+  function renderDocs() {
+    const sec = $('#secDocs');
+    sec.innerHTML = `<h2><span class="n">${mode === 'sim' ? 4 : 3}</span>The work, draft by draft</h2><p class="muted small">Every version, who reviewed it, what they rejected and how the next draft answered it. Tap a highlighted term for its meaning and lesson.</p>
+      <div class="doc-tabs">${e.docs.map((d, i) => `<button data-i="${i}" class="${i === 0 ? 'on' : ''}">${esc(d.title)}<small>${esc(d.aud)}</small></button>`).join('')}</div><div id="docBody"></div>`;
+    const showDoc = i => {
+      $$('.doc-tabs button', sec).forEach(b => b.classList.toggle('on', +b.dataset.i === i));
+      const d = e.docs[i]; let v = d.versions.length - 1; let diff = false;
+      const draw = () => {
+        const ver = d.versions[v]; const prev = d.versions[v - 1];
+        $('#docBody').innerHTML = `<div class="vtimeline">${d.versions.map((x, k) => `<button data-v="${k}" class="${k === v ? 'on' : ''} st-${/reject|return|not ready|changes|pushback|rewrite/i.test(x.status) ? 'bad' : /approv|accept|ready|sent|ship|publish|record|keep|order/i.test(x.status) ? 'good' : 'mid'}"><b>${esc(x.v)}</b><span>${esc(x.status)}</span></button>${k < d.versions.length - 1 ? '<i class="arrow">→</i>' : ''}`).join('')}</div>
+        <div class="docwrap">
+          <article class="docpaper"><div class="docmeta"><span>${esc(ver.by || '')}</span>${prev ? `<label class="difft"><input type="checkbox" id="dt" ${diff ? 'checked' : ''}> Show changes from ${esc(prev.v)}</label>` : ''}</div>
+            <div class="docbody prose-s" id="db">${diff && prev ? `<p class="diff">${wordDiff(prev.body, ver.body)}</p>` : md(ver.body)}</div></article>
+          <aside class="comments">${ver.note ? `<div class="vnote"><b>Outcome</b><p>${esc(ver.note)}</p></div>` : ''}${(ver.comments || []).map((c, n) => `<div class="cmt-card" data-n="${n + 1}">${avatar(e.cast, c[0])}<div><b>${esc(who(e.cast, c[0]).name)}</b> <span class="cn">${n + 1}</span><q>${esc(c[1])}</q><p>${esc(c[2])}</p></div></div>`).join('') || '<p class="muted small">No comments on this version.</p>'}</aside>
+        </div>`;
+        $$('.vtimeline button').forEach(b => b.onclick = () => { v = +b.dataset.v; diff = false; draw(); });
+        const dt = $('#dt'); if (dt) dt.onchange = () => { diff = dt.checked; draw(); };
+        if (!diff && ver.comments) markQuotes($('#db'), ver.comments);
+        $$('.cmt-card').forEach(c => { c.onmouseenter = () => { const mk = $(`mark.cmt[data-n="${c.dataset.n}"]`); if (mk) mk.classList.add('hot'); }; c.onmouseleave = () => $$('mark.cmt.hot').forEach(x => x.classList.remove('hot')); c.onclick = () => { const mk = $(`mark.cmt[data-n="${c.dataset.n}"]`); if (mk) mk.scrollIntoView({ block: 'center', behavior: reduced ? 'auto' : 'smooth' }); }; });
+      };
+      v = 0; draw();
+    };
+    $$('.doc-tabs button', sec).forEach(b => b.onclick = () => showDoc(+b.dataset.i)); showDoc(0);
+  }
+  function renderQA() {
+    const sec = $('#secQA');
+    sec.innerHTML = `<h2><span class="n">${mode === 'sim' ? 5 : 4}</span>Questions you'll get</h2><p class="muted small">Answer in your head or type it, then reveal what a senior would say — and what never to say.</p>
+    ${e.qa.map((q, i) => `<div class="qa panel" data-i="${i}"><div class="qa-q">${avatar(e.cast, q.who)}<div><small>${esc(who(e.cast, q.who).name)} · ${esc(who(e.cast, q.who).role)}</small><h3>${esc(q.q)}</h3></div></div>
+      <textarea rows="2" placeholder="Your answer (optional)">${esc((S0.qa || {})[i] || '')}</textarea><button class="btn sm">Reveal</button>
+      <div class="qa-a" hidden><div class="good"><b>Say</b><p>${esc(q.good)}</p></div><div class="avoid"><b>Don't say</b><p>${esc(q.avoid)}</p></div><p class="small muted"><b>Why:</b> ${esc(q.why)}</p></div></div>`).join('')}`;
+    $$('.qa', sec).forEach(card => { const ta = $('textarea', card); ta.oninput = () => { S0.qa = S0.qa || {}; S0.qa[card.dataset.i] = ta.value; persist(); }; $('button.btn', card).onclick = ev => { $('.qa-a', card).hidden = false; ev.target.remove(); }; });
+  }
+  function runChecks(txt) {
+    return (e.task.checks || []).map(([label, re]) => {
+      let ok;
+      if (re.startsWith('__words:')) { const [a, b] = re.slice(8).split('-').map(Number); const w = words(txt); ok = w >= a && w <= b; label += ` (you: ${w})`; }
+      else if (re.startsWith('__sentences:')) { const [a, b] = re.slice(12).split('-').map(Number); const n = (txt.match(/[^.!?]+[.!?]+/g) || []).length; ok = n >= a && n <= b; label += ` (you: ${n})`; }
+      else { try { ok = new RegExp(re, 'im').test(txt); } catch (x) { ok = false; } }
+      return [label, ok];
+    });
+  }
+  function renderTask() {
+    const sec = $('#secTask'); const t = e.task; if (!t) return;
+    const n = mode === 'sim' ? 3 : 5;
+    sec.innerHTML = `<h2><span class="n">${n}</span>${mode === 'sim' ? 'Do the work' : 'Your turn'}</h2>
+      <div class="panel task"><p><b>${esc(t.prompt)}</b></p><label class="lbl" for="tt">${esc(t.label)}</label><textarea id="tt" rows="8">${esc(S0.task || '')}</textarea><p class="muted small" id="twc"></p>
+      <div class="row"><button class="btn primary" id="tcheck">${mode === 'sim' && !revealed ? 'Submit and see how the PM did it' : 'Check my work'}</button>${t.wf ? `<a class="btn" href="#/wf/${t.wf}">Use the guided workflow</a>` : ''}<button class="btn" id="tcoach">Ask coach to grade</button></div>
+      <div id="tres"></div></div>`;
+    const ta = $('#tt'); const wc = () => $('#twc').textContent = words(ta.value) + ' words'; wc();
+    ta.oninput = () => { S0.task = ta.value; wc(); try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (x) {} };
+    const showRes = txt => { const res = runChecks(txt); const pass = res.filter(r => r[1]).length;
+      $('#tres').innerHTML = `<div class="tchecks"><p><b>${pass} of ${res.length}</b> checks passed${pass === res.length ? ' — now compare with the PM\'s version.' : '.'}</p><ul>${res.map(([l, ok]) => `<li class="${ok ? 'ok' : 'no'}">${ok ? '✓' : '○'} ${esc(l)}</li>`).join('')}</ul><p class="muted small">These checks test structure and key facts. For judgment and wording, ask the coach to grade it.</p></div>`; return [pass, res.length]; };
+    if (S0.taskScore != null && S0.task) showRes(S0.task);
+    $('#tcheck').onclick = () => {
+      if (words(ta.value) < 5) { toast('Write your answer first'); ta.focus(); return; }
+      const [pass, tot] = showRes(ta.value); const first = S0.taskScore == null;
+      S0.task = ta.value; S0.taskScore = Math.round(pass / tot * 100);
+      if (first) award('ojt-task', p.name + ': ' + e.title, 10 + pass * 3, S0.taskScore, { ep: e.id }); else persist();
+      if (mode === 'sim' && !revealed) { shown = e.walk.length; renderWalkSim(true); afterWalk(); setTimeout(() => $('#secDocs').scrollIntoView({ behavior: reduced ? 'auto' : 'smooth' }), 60); }
+    };
+    $('#tcoach').onclick = () => coach(`You are grading a practice task from a PM/PO training simulation (fictional company ${p.name}). Grade like a senior ${/PO/.test(p.mentorRole) ? 'product owner' : 'product manager'}: what's strong, the top 3 gaps with severity, and a rewritten senior version.\n\nTASK: ${t.prompt}\n\nCONTEXT: ${e.scene}\n${e.sources.map(s => s.title + ': ' + (s.body || s.lines.map(l => who(e.cast, l[0]).name + ': ' + l[1]).join(' '))).join('\n').slice(0, 2500)}\n\nMY ANSWER:\n${ta.value}`);
+  }
+  // sim mode: decisions only until submit
+  function renderWalkSim(unlocked) {
+    const sec = $('#secWalk');
+    if (!unlocked) {
+      sec.innerHTML = `<h2><span class="n">2</span>Your decisions</h2><p class="muted small">Make each call before you write. You'll see the PM's reasoning after you submit.</p><div class="walk">${calls.map(i => callCard(e.walk[i], i).replace(/<div class="why"[\s\S]*?<\/div><\/div>$/, '<div class="why" hidden><b></b></div></div>')).join('')}</div>`;
+      $$('.call', sec).forEach(card => { const i = +card.dataset.i; $$('.opts button', card).forEach(b => b.onclick = () => { if (S0.calls[i] != null) return; S0.calls[i] = +b.dataset.k; persist(); $$('.opts button', card).forEach(x => { x.disabled = true; x.classList.toggle('picked', +x.dataset.k === S0.calls[i]); }); card.classList.add('answered'); }); if (S0.calls[i] != null) $$('.opts button', card).forEach(x => { x.disabled = true; x.classList.remove('right', 'wrong'); x.classList.toggle('picked', +x.dataset.k === S0.calls[i]); }); });
+    } else { shown = e.walk.length; renderWalk(); }
+  }
+  function renderFoot() {
+    const f = $('#epFoot');
+    f.innerHTML = `<div class="panel foot-in"><div><h2>${S0.done ? 'Episode complete' : 'Finished watching?'}</h2><p class="muted small">Try the same stage with another product to see how the thinking transfers.</p></div>
+      <div class="row">${S0.done ? '' : '<button class="btn primary" id="epDone">Mark episode complete</button>'}${others.map(o => `<a class="btn" href="#/ojt/${o.id}">${esc(O.products[o.p].name)}: ${esc(o.title)}</a>`).join('')}${epFor(e.s + 1, e.p) ? `<a class="btn" href="#/ojt/${epFor(e.s + 1, e.p).id}">Next stage with ${esc(p.name)} ›</a>` : ''}</div></div>`;
+    const d = $('#epDone'); if (d) d.onclick = () => { S0.done = Date.now(); const right = calls.filter(i => S0.calls[i] === e.walk[i].call.a).length; award('ojt', p.name + ': ' + e.title, 40 + right * 5, right + '/' + calls.length, { ep: e.id }); renderFoot(); };
+  }
+
+  if (mode === 'watch') {
+    shown = 1; renderWalk();
+    // returning visitor: show all
+    if (S0.done || Object.keys(S0.calls).length >= calls.length && calls.length) { shown = e.walk.length; renderWalk(); afterWalk(); }
+  } else {
+    renderWalkSim(false); renderTask();
+    if (S0.taskScore != null) { revealed = false; shown = e.walk.length; renderWalkSim(true); afterWalk(); }
+  }
+}
+
 /* ---------- PROGRESS ---------- */
 VIEWS.progress = m => {
   const days = []; for (let i = 83; i >= 0; i--) days.push(addDays(today(), -i));
@@ -971,6 +1229,7 @@ VIEWS.progress = m => {
       <div><b>${Object.keys(S.checks).length}/${P.checks.length}</b><span>exercises ticked</span></div>
       <div><b>${Object.values(S.cards).filter(c => c.box >= 4).length}/${P.cards.length}</b><span>cards mastered</span></div>
       <div><b>${S.work.length}</b><span>work pieces</span></div>
+      <div><b>${ojtDoneCount()}</b><span>Shadow-a-PM episodes</span></div>
       <div><b>${counts('drills')}</b><span>drill sets</span></div>
       <div><b>${genAvg == null ? '—' : genAvg}</b><span>generator avg (last 10)</span></div>
     </section>
