@@ -1,9 +1,9 @@
 /* PM University — single-page learning app for Dijae.
-   Content: window.PMU (content.js). State: localStorage + linked Google Sheet (PayMeGPT). */
+   Content: window.PMU (content.js). State: localStorage + cloud sync (Supabase function pmu). */
 (function () {
 'use strict';
 const P = window.PMU;
-const COACH_URL = 'https://paymegpt.com/agents/24733270/embed';
+const COACH_URL = ''; // the old embedded coach lived on PayMeGPT; prompts are now copied for Claude or ChatGPT
 const DEFAULT_EMAIL = 'dijaedadula@gmail.com';
 const KEY = 'pmu.v1';
 const $ = (s, r = document) => r.querySelector(s);
@@ -46,7 +46,7 @@ function streak() {
   return n;
 }
 
-/* ---------- sheet sync (PayMeGPT linked sheet) ---------- */
+/* ---------- cloud sync (Supabase function pmu; URLs set by the passcode gate in index.html) ---------- */
 const Sync = (() => {
   const meta = n => (document.querySelector(`meta[name="${n}"]`) || {}).content;
   const rowsUrl = meta('sheet-rows-url'), dataUrl = meta('sheet-data-url');
@@ -70,7 +70,7 @@ const Sync = (() => {
   }
   const ve = verifiedEmail(); if (ve) S.email = ve;
   function set(s) { status = s; const el = $('#sync'); if (el) { el.dataset.s = s; el.title = label(); $('#syncTxt').textContent = label(); } }
-  function label() { return { local: 'Saved on this device', idle: 'Synced to your sheet', busy: 'Saving…', err: 'Saved here — sheet sync paused' }[status]; }
+  function label() { return { local: 'Saved on this device', idle: 'Synced across devices', busy: 'Saving…', err: 'Saved here — sync paused' }[status]; }
   async function post(row) {
     if (!rowsUrl) return;
     set('busy');
@@ -109,7 +109,7 @@ const Sync = (() => {
       }
       const works = mine.filter(x => x.Type === 'work');
       works.forEach(x => { try { const w = JSON.parse(x.Data); const i = S.work.findIndex(y => y.id === w.id); if (i < 0) { S.work.push(w); changed = true; } else if ((S.work[i].ts || 0) < w.ts || !S.work[i].md) { S.work[i] = w; changed = true; } } catch (e) {} });
-      if (changed) { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} route(); updateChrome(); toast('Progress restored from your sheet'); }
+      if (changed) { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} route(); updateChrome(); toast('Progress restored from the cloud'); }
       set('idle');
     } catch (e) { set('err'); }
   }
@@ -132,12 +132,12 @@ async function copy(text) {
 /* ---------- coach drawer ---------- */
 function coach(prompt) {
   const d = $('#coach'); const f = $('#coachFrame');
-  if (!f.src) f.src = COACH_URL;
+  if (COACH_URL && !f.src) f.src = COACH_URL;
   d.classList.add('open'); document.body.classList.add('coach-open');
   const hint = $('#coachHint');
   if (prompt) {
     copy(prompt).then(ok => {
-      hint.innerHTML = ok ? '<strong>Copied.</strong> Paste it into the chat below (Ctrl/Cmd + V) and send.' : 'Copy this into the chat:<br><code>' + esc(prompt.slice(0, 400)) + '</code>';
+      hint.innerHTML = ok ? '<strong>Copied.</strong> Open your AI chat below, paste (Ctrl/Cmd + V) and send.' : 'Copy this into the chat:<br><code>' + esc(prompt.slice(0, 400)) + '</code>';
       hint.hidden = false;
     });
   } else hint.hidden = true;
@@ -214,10 +214,10 @@ function shell() {
   <main id="main" tabindex="-1"></main>
   <nav class="tabs">${NAV.slice(0, 5).map(([k, l]) => `<a href="#/${k}" data-nav="${k}">${icon(k)}<span>${k === 'ojt' ? 'Shadow' : l}</span></a>`).join('')}</nav>
   <aside id="coach" class="coach" aria-label="AI coach">
-    <div class="coach-head"><div><b>Coach</b><small>Gemini, inside PayMeGPT</small></div><button class="icon-btn" id="coachClose" aria-label="Close coach">✕</button></div>
+    <div class="coach-head"><div><b>Coach</b><small>Copies a prompt for your AI chat</small></div><button class="icon-btn" id="coachClose" aria-label="Close coach">✕</button></div>
     <div class="coach-cmds">${['Flash me Module D', 'Scenario drill', 'Grade my rationale', 'Mock interview', 'What am I weakest at?'].map(c => `<button class="chip" data-cmd="${c}">${c}</button>`).join('')}</div>
     <p id="coachHint" class="coach-hint" hidden></p>
-    <iframe id="coachFrame" title="PM University Coach"></iframe>
+    <iframe id="coachFrame" title="PM University Coach" hidden></iframe><div class="coach-open-links" style="display:flex;gap:8px;flex-wrap:wrap;padding:12px 16px"><a class="btn" href="https://claude.ai/new" target="_blank" rel="noopener">Open Claude</a><a class="btn" href="https://chatgpt.com/" target="_blank" rel="noopener">Open ChatGPT</a></div>
   </aside>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <div id="termpop" class="termpop" hidden></div>
@@ -227,7 +227,7 @@ function shell() {
     const cmd = e.target.closest('[data-cmd]'); if (cmd) coach(cmd.dataset.cmd);
   });
   $('#coachClose').onclick = closeCoach;
-  $('#sync').onclick = () => { if (Sync.enabled) { Sync.snapshot(); toast('Saving to your sheet'); } else toast('Open the app from your PayMeGPT link to sync to your sheet'); };
+  $('#sync').onclick = () => { if (Sync.enabled) { Sync.snapshot(); toast('Saving to the cloud'); } else toast('Unlock the app with your passcode to sync across devices'); };
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeCoach(); });
   // selection → ask coach
   document.addEventListener('selectionchange', () => {
@@ -1218,7 +1218,7 @@ VIEWS.progress = m => {
   const lv = { Junior: 0, Mid: 0, Senior: 0 }; Object.values(S.scen).forEach(a => a.forEach(x => lv[x.lvl]++)); S.gen.forEach(g => lv[g.lvl] = (lv[g.lvl] || 0) + 1);
   const lvT = Math.max(1, lv.Junior + lv.Mid + lv.Senior);
   const genAvg = S.gen.length ? Math.round(S.gen.slice(0, 10).reduce((a, g) => a + g.pts, 0) / Math.min(10, S.gen.length)) : null;
-  m.innerHTML = `<header class="page-head"><h1>Progress</h1><p>Signed in as <b>${esc(S.email)}</b>. ${Sync.enabled ? 'Every action is saved here and to your progress sheet.' : 'Saved on this device. Open your PayMeGPT link to sync across devices.'}</p></header>
+  m.innerHTML = `<header class="page-head"><h1>Progress</h1><p>Signed in as <b>${esc(S.email)}</b>. ${Sync.enabled ? 'Every action is saved here and synced across your devices.' : 'Saved on this device. Unlock with your passcode to sync across devices.'}</p></header>
   <section class="panel">
     <div class="row between"><h2>Last 12 weeks</h2><span class="muted small">${S.xp.toLocaleString()} XP total · ${streak()}-day streak</span></div>
     <div class="heat" role="img" aria-label="Activity heatmap">${days.map(d => `<i title="${d}: ${S.days[d] || 0} XP" style="--a:${(S.days[d] || 0) / max}" class="${S.days[d] ? 'on' : ''} ${d === today() ? 'now' : ''}"></i>`).join('')}</div>
